@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GeoGuessr Klonu - Multiplayer</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBK_loZ_NDlW9jQ1KXrqjrkGMcgjzSnWtM&libraries=geometry&callback=initApp">
+  </script>
+</head>
+<body>
+  <main id="app">
+    
+    <section id="main-menu-screen" class="screen active">
+      <div class="card">
+        <h1>GeoGuessr Klonu</h1>
+        <p>Dünyayı keşfetmeye hazır mısın?</p>
+        
+        <div class="input-group">
+          <input type="text" id="player-name-input" placeholder="Oyuncu Adın" maxlength="15" />
+        </div>
+
+        <div class="menu-buttons">
+          <button id="singleplayer-btn" class="primary">Tek Kişilik</button>
+          <button id="multiplayer-btn" class="secondary">Çok Kişilik (P2P)</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="lobby-screen" class="screen">
+      <div class="card">
+        <h2>Çoklu Oyuncu</h2>
+        <p id="lobby-status">Lütfen bir işlem seçin.</p>
+        
+        <div id="lobby-actions">
+          <button id="create-room-btn" class="primary">Oda Kur (Host)</button>
+          
+          <div class="divider">
+            <span></span><p>veya</p><span></span>
+          </div>
+
+          <div class="join-room-container">
+            <input type="text" id="room-code-input" placeholder="Oda Numarası Gir" />
+            <button id="join-room-btn" class="secondary">Katıl</button>
+          </div>
+        </div>
+
+        <div id="room-info" class="hidden">
+          <div class="room-code-display">
+            <p>Oda Numaran:</p>
+            <h1 id="my-room-id">...</h1>
+            <p class="small">Arkadaşına bu numarayı ver.</p>
+          </div>
+          <div class="waiting-animation">Rakip Bekleniyor...</div>
+        </div>
+        
+        <button id="lobby-back-btn" class="back-text-btn">Geri Dön</button>
+      </div>
+    </section>
+
+    <section id="setup-screen" class="screen">
+      <div class="card">
+        <h1 id="setup-title">Oyun Ayarları</h1>
+        <p id="setup-subtitle">Dünya turuna çık veya istediğin şehirde oyna.</p>
+        
+        <div class="rounds-selection">
+          <p class="rounds-label">Raund Sayısı Seç:</p>
+          <div class="rounds-buttons">
+            <button class="round-btn" data-rounds="3">3 Raund<br><span>(Max: 3000)</span></button>
+            <button class="round-btn" data-rounds="5">5 Raund<br><span>(Max: 5000)</span></button>
+            <button class="round-btn" data-rounds="10">10 Raund<br><span>(Max: 10000)</span></button>
+          </div>
+        </div>
+
+        <div class="divider">
+          <span></span>
+          <p>Oyun Modu</p>
+          <span></span>
+        </div>
+
+        <button id="global-btn" class="primary" disabled>Dünya Turu (Global)</button>
+        <div class="divider">
+          <span></span>
+          <p>ya da</p>
+          <span></span>
+        </div>
+        <div class="region-form">
+          <input type="text" id="region-input" placeholder="Örn: İstanbul, France" />
+          <button id="region-btn" class="secondary" disabled>Bu Bölgede Oyna</button>
+        </div>
+        <p class="hint">Host oyunu başlattığında diğer oyuncu otomatik bağlanır.</p>
+      </div>
+    </section>
+
+    <section id="game-screen" class="screen">
+      <button id="back-to-menu-btn" aria-label="Menüye dön">⌂</button>
+      
+      <div id="mp-scoreboard" class="hidden">
+        <div class="mp-player me">
+          <span id="p1-name">Sen</span>: <span id="p1-score">0</span>
+        </div>
+        <div class="mp-player opponent">
+          <span id="p2-name">Rakip</span>: <span id="p2-score">0</span>
+        </div>
+      </div>
+
+      <div id="game-stats">
+        <div class="stat-item">
+          <span class="stat-label">Raund</span>
+          <span class="stat-value">
+            <span id="current-round">1</span> / <span id="total-rounds">3</span>
+          </span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Puan</span>
+          <span id="total-score">0</span>
+        </div>
+      </div>
+
+      <div id="street-view"></div>
+      
+      <div id="mini-map-container">
+        <div id="mini-map"></div>
+        <button id="guess-btn" disabled>Tahmin Et</button>
+      </div>
+
+      <div id="round-feedback" class="hidden">
+        <p id="feedback-distance"></p>
+        <p id="feedback-score"></p>
+        <div id="opponent-feedback" class="hidden">Rakip henüz tahmin etmedi...</div>
+        <button id="next-round-btn" class="primary" disabled>Devam Et</button>
+      </div>
+    </section>
+
+    <section id="end-screen" class="screen">
+      <div class="card">
+        <h1>Oyun Bitti!</h1>
+        <div class="final-stats">
+          <p class="final-score-label">Toplam Puanın</p>
+          <p class="final-score" id="final-total-score">0</p>
+          
+          <div id="mp-result" class="hidden">
+            <div class="divider"><span></span><p>SONUÇ</p><span></span></div>
+            <p id="winner-text" style="font-size: 1.2rem; color: var(--primary); font-weight: bold;"></p>
+            <p id="opponent-final-score" style="color: var(--muted); margin-top:0.5rem;"></p>
+          </div>
+        </div>
+
+        <div class="end-buttons-group">
+            <button id="play-again-match-btn" class="primary">Yeni Oyun Başlat</button>
+            <button id="exit-menu-btn" class="secondary">Ana Menüye Dön</button>
+        </div>
+        
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
