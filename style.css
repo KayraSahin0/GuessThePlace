@@ -201,3 +201,21 @@ button:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.
   .mp-player { font-size: 0.8rem; }
   #mini-map-container { width: calc(100vw - 24px); right: 12px; bottom: 12px; }
 }
+
+/* Oda kodunun tıklanabilir olduğunu göster */
+#my-room-id {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 5px 10px;
+  border-radius: 8px;
+}
+
+#my-room-id:hover {
+  background: rgba(78, 205, 196, 0.1); /* Hafif bir arka plan */
+  color: var(--primary);
+  transform: scale(1.05); /* Hafif büyüme efekti */
+}
+
+#my-room-id:active {
+  transform: scale(0.95); /* Tıklama hissi */
+}

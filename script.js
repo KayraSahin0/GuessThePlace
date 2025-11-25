@@ -161,7 +161,32 @@ function attachListeners() {
       }
     });
   }
+
+  // (Oda Kodu Kopyalama) --
+  if (myRoomIdEl) {
+    myRoomIdEl.addEventListener("click", () => {
+      const code = peer.id; // Direkt Peer objesinden ID'yi alıyoruz (daha güvenli)
+      
+      if (!code) return; // Kod henüz oluşmadıysa işlem yapma
+
+      navigator.clipboard.writeText(code).then(() => {
+        // Görsel geri bildirim ver
+        const originalText = myRoomIdEl.textContent;
+        myRoomIdEl.textContent = "KOPYALANDI! ✅";
+        myRoomIdEl.style.color = "#4ecdc4"; // Yeşilimsi renk
+
+        // 1.5 saniye sonra eski haline döndür
+        setTimeout(() => {
+          myRoomIdEl.textContent = originalText;
+          myRoomIdEl.style.color = ""; 
+        }, 1500);
+      }).catch(err => {
+        alert("Kopyalama başarısız oldu: " + err);
+      });
+    });
+  }
 }
+
 
 // --- P2P MANTIK (PEERJS) ---
 
