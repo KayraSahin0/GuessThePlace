@@ -26,6 +26,8 @@ const screens = {
   end: document.getElementById("end-screen")
 };
 
+const mainLayout = document.getElementById("main-layout"); // Reklam kontrolü için
+
 // Menü Elementleri
 const playerNameInput = document.getElementById("player-name-input");
 const singleplayerBtn = document.getElementById("singleplayer-btn");
@@ -70,26 +72,44 @@ window.initApp = () => {
 function showScreen(screenName) {
   Object.values(screens).forEach(el => el.classList.remove("active"));
   screens[screenName].classList.add("active");
+
+  // REKLAM KONTROLÜ: Eğer oyun ekranıysa reklamları gizle
+  if (screenName === "game-screen") {
+    mainLayout.classList.add("game-active");
+  } else {
+    mainLayout.classList.remove("game-active");
+  }
 }
 
 function attachListeners() {
-  // 1. Ana Menü
+  // 1. İsim ve Menü Kontrolleri
   singleplayerBtn.addEventListener("click", () => {
-    myName = playerNameInput.value.trim() || "Oyuncu";
+    const inputName = playerNameInput.value.trim();
+    if (inputName.length < 3) {
+      alert("Lütfen oyuna başlamak için en az 3 harfli bir isim giriniz!");
+      playerNameInput.focus();
+      return;
+    }
+    myName = inputName;
     isMultiplayer = false;
     showScreen("setup");
     resetSetupUI();
   });
 
   multiplayerBtn.addEventListener("click", () => {
-    myName = playerNameInput.value.trim() || "Oyuncu";
-    if(!myName) { alert("Lütfen bir isim gir."); return; }
+    const inputName = playerNameInput.value.trim();
+    if (inputName.length < 3) {
+      alert("Lütfen çoklu oyuncu modu için en az 3 harfli bir isim giriniz!");
+      playerNameInput.focus();
+      return;
+    }
+    myName = inputName;
     isMultiplayer = true;
     showScreen("lobby");
-    initPeer(); // PeerJS Başlat
+    initPeer(); 
   });
 
-  // 2. Lobby & P2P
+  // 2. Lobi Kontrolleri
   createRoomBtn.addEventListener("click", createRoom);
   joinRoomBtn.addEventListener("click", joinRoom);
   lobbyBackBtn.addEventListener("click", () => {
@@ -99,12 +119,26 @@ function attachListeners() {
     roomInfoDiv.classList.add("hidden");
   });
 
-  // 3. Oyun Ayarları
+  if (myRoomIdEl) {
+    myRoomIdEl.addEventListener("click", () => {
+      const code = peer ? peer.id : null;
+      if (!code) return;
+      navigator.clipboard.writeText(code).then(() => {
+        const originalText = myRoomIdEl.textContent;
+        myRoomIdEl.textContent = "KOPYALANDI! ✅";
+        myRoomIdEl.style.color = "#4ecdc4";
+        setTimeout(() => {
+          myRoomIdEl.textContent = originalText;
+          myRoomIdEl.style.color = ""; 
+        }, 1500);
+      }).catch(err => alert("Kopyalama başarısız: " + err));
+    });
+  }
+
+  // 3. Ayar Ekranı
   document.querySelectorAll(".round-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      // Joiner (Katılımcı) ayar değiştiremez
       if(isMultiplayer && !isHost) return; 
-
       document.querySelectorAll(".round-btn").forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
       totalRounds = parseInt(btn.dataset.rounds);
@@ -126,7 +160,7 @@ function attachListeners() {
     startGame("region", query);
   });
 
-  // 4. Oyun İçi
+  // 4. Oyun İçi Butonlar
   guessBtn.addEventListener("click", handleGuess);
   nextRoundBtn.addEventListener("click", handleNextRound);
   
@@ -136,19 +170,36 @@ function attachListeners() {
     }
   });
 
-  // 5. Oyun Sonu (Play Again Fix)
+  // 5. Harita Genişletme Butonu
+  const mapExpandBtn = document.getElementById("map-expand-btn");
+  const mapContainer = document.getElementById("mini-map-container");
+
+  if (mapExpandBtn && mapContainer) {
+    mapExpandBtn.addEventListener("click", () => {
+      mapContainer.classList.toggle("expanded");
+      const isExpanded = mapContainer.classList.contains("expanded");
+      mapExpandBtn.textContent = isExpanded ? "↘" : "↖"; 
+      setTimeout(() => {
+        if(miniMap) {
+           google.maps.event.trigger(miniMap, "resize");
+           if(guessedLatLng) miniMap.setCenter(guessedLatLng);
+           else miniMap.setCenter({lat:0, lng:0});
+        }
+      }, 300); 
+    });
+  }
+
+  // 6. Oyun Sonu
   if (playAgainMatchBtn) {
     playAgainMatchBtn.addEventListener("click", () => {
       if (isMultiplayer) {
         if (isHost) {
-          // Host ise diğer tarafa sinyal gönder ve kendini resetle
           conn.send({ type: 'PLAY_AGAIN' });
           resetToSetup(); 
         } else {
           alert("Yeni oyunu sadece oda kurucusu başlatabilir.");
         }
       } else {
-        // Tek kişilikse direkt resetle
         resetToSetup();
       }
     });
@@ -161,56 +212,18 @@ function attachListeners() {
       }
     });
   }
-
-  // (Oda Kodu Kopyalama) --
-  if (myRoomIdEl) {
-    myRoomIdEl.addEventListener("click", () => {
-      const code = peer.id; // Direkt Peer objesinden ID'yi alıyoruz (daha güvenli)
-      
-      if (!code) return; // Kod henüz oluşmadıysa işlem yapma
-
-      navigator.clipboard.writeText(code).then(() => {
-        // Görsel geri bildirim ver
-        const originalText = myRoomIdEl.textContent;
-        myRoomIdEl.textContent = "KOPYALANDI! ✅";
-        myRoomIdEl.style.color = "#4ecdc4"; // Yeşilimsi renk
-
-        // 1.5 saniye sonra eski haline döndür
-        setTimeout(() => {
-          myRoomIdEl.textContent = originalText;
-          myRoomIdEl.style.color = ""; 
-        }, 1500);
-      }).catch(err => {
-        alert("Kopyalama başarısız oldu: " + err);
-      });
-    });
-  }
 }
 
-
-// --- P2P MANTIK (PEERJS) ---
-
+// --- P2P MANTIK ---
 function initPeer() {
   peer = new Peer(null, { debug: 1 });
-
-  peer.on('open', (id) => {
-    console.log('My Peer ID is: ' + id);
-  });
-
+  peer.on('open', (id) => { console.log('My Peer ID: ' + id); });
   peer.on('connection', (c) => {
-    // HOST tarafı: Birisi bağlandığında çalışır
-    if(conn && conn.open) {
-      c.close();
-      return;
-    }
+    if(conn && conn.open) { c.close(); return; }
     conn = c;
     setupConnection();
   });
-
-  peer.on('error', (err) => {
-    alert("Bağlantı hatası: " + err.type);
-    showScreen("menu");
-  });
+  peer.on('error', (err) => { alert("Hata: " + err.type); showScreen("menu"); });
 }
 
 function createRoom() {
@@ -218,21 +231,14 @@ function createRoom() {
   lobbyActionsDiv.classList.add("hidden");
   roomInfoDiv.classList.remove("hidden");
   lobbyStatus.textContent = "Oda oluşturuluyor...";
-  
-  if(peer.id) {
-    myRoomIdEl.textContent = peer.id;
-  } else {
-    peer.on('open', (id) => {
-      myRoomIdEl.textContent = id;
-    });
-  }
+  if(peer.id) { myRoomIdEl.textContent = peer.id; }
+  else { peer.on('open', (id) => { myRoomIdEl.textContent = id; }); }
 }
 
 function joinRoom() {
   isHost = false;
   const roomId = roomCodeInput.value.trim();
   if(!roomId) return alert("Oda kodu girin.");
-
   conn = peer.connect(roomId);
   setupConnection();
 }
@@ -240,36 +246,22 @@ function joinRoom() {
 function setupConnection() {
   conn.on('open', () => {
     conn.send({ type: 'HELLO', name: myName });
-    
     if(isHost) {
-      lobbyStatus.textContent = "Oyuncu bağlandı! Ayarlar yapılıyor...";
-      setTimeout(() => {
-        showScreen("setup");
-        resetSetupUI();
-      }, 1000);
+      lobbyStatus.textContent = "Bağlandı! Ayarlar yapılıyor...";
+      setTimeout(() => { showScreen("setup"); resetSetupUI(); }, 1000);
     } else {
-      lobbyStatus.textContent = "Bağlandı! Host ayarları yapıyor...";
+      lobbyStatus.textContent = "Bağlandı! Host bekleniyor...";
       showScreen("setup");
       lockSetupUIForJoiner();
     }
   });
-
-  conn.on('data', (data) => {
-    handleData(data);
-  });
-
-  conn.on('close', () => {
-    alert("Bağlantı koptu.");
-    fullReset();
-  });
+  conn.on('data', (data) => { handleData(data); });
+  conn.on('close', () => { alert("Bağlantı koptu."); fullReset(); });
 }
 
 function handleData(data) {
   switch(data.type) {
-    case 'HELLO':
-      opponentName = data.name || "Rakip";
-      break;
-      
+    case 'HELLO': opponentName = data.name || "Rakip"; break;
     case 'START_GAME':
       totalRounds = data.rounds;
       maxScore = totalRounds * 1000;
@@ -278,34 +270,19 @@ function handleData(data) {
       currentBounds = data.bounds;
       startScreenTransition();
       break;
-
-    case 'ROUND_COORDS':
-      loadPanorama(new google.maps.LatLng(data.lat, data.lng));
-      break;
-
+    case 'ROUND_COORDS': loadPanorama(new google.maps.LatLng(data.lat, data.lng)); break;
     case 'OPPONENT_GUESS':
       opponentScore += data.score;
       opponentGuessed = true;
       updateMPScoreboard();
-      
       if(roundLocked) {
         opponentFeedback.textContent = `${opponentName} +${data.score} puan aldı.`;
         opponentFeedback.classList.remove("hidden");
       }
       break;
-
-    case 'NEXT_ROUND':
-      loadRound();
-      break;
-      
-    case 'GAME_OVER':
-      endGame(true);
-      break;
-    
-    case 'PLAY_AGAIN':
-      resetToSetup();
-      lockSetupUIForJoiner();
-      break;
+    case 'NEXT_ROUND': loadRound(); break;
+    case 'GAME_OVER': endGame(true); break;
+    case 'PLAY_AGAIN': resetToSetup(); lockSetupUIForJoiner(); break;
   }
 }
 
@@ -319,55 +296,37 @@ function resetSetupUI() {
   document.getElementById("setup-title").textContent = "Oyun Ayarları";
   document.getElementById("setup-subtitle").textContent = "Dünya turuna çık veya istediğin şehirde oyna.";
   document.querySelectorAll("#setup-screen button").forEach(b => b.disabled = false);
-  globalBtn.disabled = true; 
-  regionBtn.disabled = true;
+  globalBtn.disabled = true; regionBtn.disabled = true;
   document.querySelectorAll(".round-btn").forEach(b => b.classList.remove("selected"));
   totalRounds = 0;
 }
 
 // --- OYUN MANTIĞI ---
-
 function startGame(mode, query = null) {
   if (totalRounds === 0) return alert("Raund sayısı seçin.");
-
   lastGameMode = mode;
   lastRegionQuery = query;
 
-  if (isMultiplayer) {
-    if (isHost) {
-      if (mode === "region") {
-        fetchRegionBounds(query).then(bounds => {
-          currentBounds = bounds;
-          conn.send({ 
-            type: 'START_GAME', 
-            rounds: totalRounds, 
-            mode: mode, 
-            query: query,
-            bounds: bounds 
-          });
-          startScreenTransition();
-        }).catch(() => alert("Bölge bulunamadı"));
-      } else {
-        conn.send({ type: 'START_GAME', rounds: totalRounds, mode: 'global' });
-        startScreenTransition();
-      }
-    }
-  } else {
+  if (isMultiplayer && isHost) {
     if (mode === "region") {
-        fetchRegionBounds(query).then(bounds => {
-            currentBounds = bounds;
-            startScreenTransition();
-        });
-    } else {
+      fetchRegionBounds(query).then(bounds => {
+        currentBounds = bounds;
+        conn.send({ type: 'START_GAME', rounds: totalRounds, mode: mode, query: query, bounds: bounds });
         startScreenTransition();
+      }).catch(() => alert("Bölge bulunamadı"));
+    } else {
+      conn.send({ type: 'START_GAME', rounds: totalRounds, mode: 'global' });
+      startScreenTransition();
     }
+  } else if (!isMultiplayer) {
+    if (mode === "region") {
+        fetchRegionBounds(query).then(bounds => { currentBounds = bounds; startScreenTransition(); });
+    } else { startScreenTransition(); }
   }
 }
 
 function startScreenTransition() {
-  currentRound = 0;
-  totalScore = 0;
-  opponentScore = 0;
+  currentRound = 0; totalScore = 0; opponentScore = 0;
   showScreen("game");
   updateMPScoreboard();
   
@@ -378,17 +337,12 @@ function startScreenTransition() {
   } else {
     mpScoreboard.classList.add("hidden");
   }
-
   loadRound();
 }
 
 function loadRound() {
   currentRound++;
-  
-  if (currentRound > totalRounds) {
-    endGame();
-    return;
-  }
+  if (currentRound > totalRounds) { endGame(); return; }
 
   roundLocked = false;
   guessBtn.disabled = true;
@@ -402,35 +356,24 @@ function loadRound() {
   updateGameStats();
 
   if(isMultiplayer) {
-    if(isHost) {
-      nextRoundBtn.disabled = true;
-      generateCoordinatesAndLoad();
-    } else {
-      nextRoundBtn.disabled = true;
-    }
+    if(isHost) { nextRoundBtn.disabled = true; generateCoordinatesAndLoad(); }
+    else { nextRoundBtn.disabled = true; }
   } else {
     generateCoordinatesAndLoad();
   }
 }
 
 function generateCoordinatesAndLoad() {
-  if (lastGameMode === "global") {
-    fetchRandomGlobalPanorama();
-  } else if (currentBounds) {
-    fetchRandomRegionalPanorama();
-  }
+  if (lastGameMode === "global") fetchRandomGlobalPanorama();
+  else if (currentBounds) fetchRandomRegionalPanorama();
 }
 
 function fetchRandomGlobalPanorama(attempt = 0) {
   const sv = new google.maps.StreetViewService();
   const latLng = new google.maps.LatLng(Math.random()*170-85, Math.random()*360-180);
-  
   sv.getPanorama({ location: latLng, radius: 100000 }, (data, status) => {
-    if (status === "OK") {
-      processValidLocation(data.location.latLng);
-    } else {
-      if(attempt < 10) fetchRandomGlobalPanorama(attempt + 1);
-    }
+    if (status === "OK") processValidLocation(data.location.latLng);
+    else if(attempt < 10) fetchRandomGlobalPanorama(attempt + 1);
   });
 }
 
@@ -443,23 +386,14 @@ function fetchRandomRegionalPanorama(attempt = 0) {
   
   const sv = new google.maps.StreetViewService();
   sv.getPanorama({ location: {lat, lng}, radius: 1000 }, (data, status) => {
-    if (status === "OK") {
-      processValidLocation(data.location.latLng);
-    } else {
-      if(attempt < 20) fetchRandomRegionalPanorama(attempt + 1);
-    }
+    if (status === "OK") processValidLocation(data.location.latLng);
+    else if(attempt < 20) fetchRandomRegionalPanorama(attempt + 1);
   });
 }
 
 function processValidLocation(latLng) {
   loadPanorama(latLng);
-  if (isMultiplayer && isHost) {
-    conn.send({ 
-      type: 'ROUND_COORDS', 
-      lat: latLng.lat(), 
-      lng: latLng.lng() 
-    });
-  }
+  if (isMultiplayer && isHost) conn.send({ type: 'ROUND_COORDS', lat: latLng.lat(), lng: latLng.lng() });
 }
 
 function loadPanorama(latLng) {
@@ -467,11 +401,8 @@ function loadPanorama(latLng) {
   streetViewPanorama = new google.maps.StreetViewPanorama(
     document.getElementById("street-view"),
     {
-      position: latLng,
-      pov: { heading: 0, pitch: 0 },
-      zoomControl: true,
-      addressControl: false,
-      showRoadLabels: false
+      position: latLng, pov: { heading: 0, pitch: 0 },
+      zoomControl: true, addressControl: false, showRoadLabels: false
     }
   );
 }
@@ -497,14 +428,8 @@ function handleGuess() {
 }
 
 function handleNextRound() {
-  if(isMultiplayer) {
-    if(isHost) {
-      conn.send({ type: 'NEXT_ROUND' });
-      loadRound();
-    }
-  } else {
-    loadRound();
-  }
+  if(isMultiplayer && isHost) { conn.send({ type: 'NEXT_ROUND' }); loadRound(); }
+  else if(!isMultiplayer) { loadRound(); }
 }
 
 function showFeedback(dist, score) {
@@ -541,10 +466,8 @@ function hideFeedback() {
 }
 
 function endGame(fromNetwork = false) {
-  if(isMultiplayer && isHost && !fromNetwork) {
-    conn.send({ type: 'GAME_OVER' });
-  }
-
+  if(isMultiplayer && isHost && !fromNetwork) { conn.send({ type: 'GAME_OVER' }); }
+  
   showScreen("end");
   document.getElementById("final-total-score").textContent = totalScore;
   
@@ -552,13 +475,11 @@ function endGame(fromNetwork = false) {
   if(isMultiplayer) {
     mpResult.classList.remove("hidden");
     document.getElementById("opponent-final-score").textContent = `${opponentName}: ${opponentScore}`;
-    
     const winnerText = document.getElementById("winner-text");
     if(totalScore > opponentScore) winnerText.textContent = "KAZANDIN! 🏆";
     else if(totalScore < opponentScore) winnerText.textContent = "KAYBETTİN...";
     else winnerText.textContent = "BERABERE!";
     
-    // Joiner'a butonu kilitle
     if(!isHost) {
       playAgainMatchBtn.disabled = true;
       playAgainMatchBtn.textContent = "Host Bekleniyor...";
@@ -568,7 +489,6 @@ function endGame(fromNetwork = false) {
       playAgainMatchBtn.textContent = "Yeni Oyun Başlat";
       playAgainMatchBtn.style.opacity = "1";
     }
-
   } else {
     mpResult.classList.add("hidden");
     playAgainMatchBtn.disabled = false;
@@ -579,24 +499,15 @@ function endGame(fromNetwork = false) {
 
 function resetToSetup() {
   showScreen("setup");
-  
-  // Değişkenleri sıfırla
-  currentRound = 0;
-  totalScore = 0;
-  opponentScore = 0;
-  opponentGuessed = false;
-  roundLocked = false;
-  guessedLatLng = null;
-  actualLatLng = null;
-  
+  currentRound = 0; totalScore = 0; opponentScore = 0;
+  opponentGuessed = false; roundLocked = false;
+  guessedLatLng = null; actualLatLng = null;
   clearMiniMapAnnotations();
   resetSetupUI();
   
   if(isMultiplayer) {
     document.getElementById("p1-score").textContent = "0";
     document.getElementById("p2-score").textContent = "0";
-    
-    // Joiner buton durumunu ayarla
     if(!isHost) {
         playAgainMatchBtn.disabled = true;
         playAgainMatchBtn.textContent = "Host Bekleniyor...";
@@ -618,40 +529,24 @@ function initMiniMap() {
     zoom: 2, center: { lat: 0, lng: 0 },
     disableDefaultUI: true, clickableIcons: false
   });
-  
-  guessMarkerIcon = {
-    path: google.maps.SymbolPath.CIRCLE, scale: 7,
-    fillColor: "#ff6b6b", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2
-  };
-  actualMarkerIcon = {
-    path: google.maps.SymbolPath.CIRCLE, scale: 7,
-    fillColor: "#4ecdc4", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2
-  };
+  guessMarkerIcon = { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#ff6b6b", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2 };
+  actualMarkerIcon = { path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: "#4ecdc4", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2 };
 
   miniMap.addListener("click", (e) => {
     if(roundLocked) return;
     guessedLatLng = e.latLng;
     guessBtn.disabled = false;
-    
-    if(!miniMapMarker) {
-      miniMapMarker = new google.maps.Marker({ position: e.latLng, map: miniMap, icon: guessMarkerIcon });
-    } else {
-      miniMapMarker.setPosition(e.latLng);
-    }
+    if(!miniMapMarker) miniMapMarker = new google.maps.Marker({ position: e.latLng, map: miniMap, icon: guessMarkerIcon });
+    else miniMapMarker.setPosition(e.latLng);
   });
 }
 
 function drawResultLines() {
   guessBtn.disabled = true;
   new google.maps.Marker({ position: actualLatLng, map: miniMap, icon: actualMarkerIcon });
-  new google.maps.Polyline({
-    path: [guessedLatLng, actualLatLng], map: miniMap,
-    strokeColor: "#4ecdc4", strokeOpacity: 0.8, strokeWeight: 3
-  });
-  
+  new google.maps.Polyline({ path: [guessedLatLng, actualLatLng], map: miniMap, strokeColor: "#4ecdc4", strokeOpacity: 0.8, strokeWeight: 3 });
   const bounds = new google.maps.LatLngBounds();
-  bounds.extend(guessedLatLng);
-  bounds.extend(actualLatLng);
+  bounds.extend(guessedLatLng); bounds.extend(actualLatLng);
   miniMap.fitBounds(bounds);
 }
 
@@ -659,19 +554,12 @@ function clearMiniMapAnnotations() {
   if (miniMapMarker) miniMapMarker.setMap(null);
   if (actualMarker) actualMarker.setMap(null);
   if (resultLine) resultLine.setMap(null);
-
-  miniMapMarker = null;
-  actualMarker = null;
-  resultLine = null;
-
+  miniMapMarker = null; actualMarker = null; resultLine = null;
   initMiniMap(); 
 }
 
 function positionMiniMap() {
-  if(miniMap) {
-    miniMap.setCenter({lat:0, lng:0});
-    miniMap.setZoom(2);
-  }
+  if(miniMap) { miniMap.setCenter({lat:0, lng:0}); miniMap.setZoom(2); }
 }
 
 function updateGameStats() {
@@ -695,6 +583,5 @@ function calculateScore(km) {
 
 function fetchRegionBounds(query) {
   return fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=AIzaSyBK_loZ_NDlW9jQ1KXrqjrkGMcgjzSnWtM`)
-    .then(r => r.json())
-    .then(d => d.results[0].geometry.viewport);
+    .then(r => r.json()).then(d => d.results[0].geometry.viewport);
 }
